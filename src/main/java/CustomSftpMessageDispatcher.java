@@ -19,10 +19,8 @@ import java.io.InputStream;
  * 
  * @author Anton Kupias
  * 
- * SftpMessageDispatcher-luokan kopio, johon on lisätty tuki puuttuvan (ali-)hakemiston luonnille
- * 
- * huom: append-option osuus kommentoitu pois koska psop-käytössä on vanha versio ilman append-optiota. Muleversion päivityksen yhteydessä voi poistaa kommentoinnin ja ottaa käyttöön jos tarvii
- *
+ * SftpMessageDispatcher fork with support for creating a non-existing remote path
+ * https://github.com/mulesoft/mule/blob/mule-3.4.x/transports/sftp/src/main/java/org/mule/transport/sftp/SftpMessageDispatcher.java
  */
 public class CustomSftpMessageDispatcher extends SftpMessageDispatcher {
 	
@@ -53,17 +51,18 @@ public class CustomSftpMessageDispatcher extends SftpMessageDispatcher {
 	            SftpNotifier notifier = new SftpNotifier(connector, event.getMessage(), endpoint, serviceName);
 	            String destDir = endpoint.getEndpointURI().getPath();
 	            
-	            //tästä lähtee muokkaus:
-	            //tässä luodaan directory jos ei löydy. connector.createSftpClient failaa ilman sitä, joten semmosta ei voi myöskään käyttää luomiseen.
+	            //modifications start here -Anton
+	            //create the directory if we get an exception. connector.createSftpClient fails with a non-existing path, thus we can not use that to create the client either
 	            client = SftpConnectionFactory.createClient(endpoint, connector.getPreferredAuthenticationMethods());
 	            try { 
 	            	client.changeWorkingDirectory(destDir);
 	            }
 	            catch(IOException e) {
+                        //an error message was just printed, but we know it's ok   
 	            	logger.error("...never mind that, we have a backup method to create it.");
 	            	/** 
-	            	Sessiosta voidaan avata komentokanava mkdir-komentoa varten, luokka löytyy samasta paketista kuin Mulen käyttämä sftp-toteutus
-	            	http://epaul.github.io/jsch-documentation/javadoc/com/jcraft/jsch/ChannelExec.html
+	            	We can use the session to open a Channel for sending a remote mkdir command. Mule uses this library for SFTP.
+                        http://epaul.github.io/jsch-documentation/javadoc/com/jcraft/jsch/ChannelExec.html
 	            	*/
 	            	Channel channel = client.getChannelSftp().getSession().openChannel("exec");
 	                ((ChannelExec)channel).setCommand("mkdir -p "+destDir);
@@ -72,8 +71,8 @@ public class CustomSftpMessageDispatcher extends SftpMessageDispatcher {
 	                
 	                channel.connect();
 
-	                /** jos haluaa tulostella jotain...
-	                 * toteutuksen malli on peräisin täältä: http://www.jcraft.com/jsch/examples/Exec.java
+	                /** in case you want to print some info...
+	                 * this is from a JSch example: http://www.jcraft.com/jsch/examples/Exec.java
 	                InputStream in=channel.getInputStream();
 	                byte[] tmp=new byte[1024];
 	                while(true){
@@ -93,7 +92,7 @@ public class CustomSftpMessageDispatcher extends SftpMessageDispatcher {
 	                channel.disconnect();
 	            }
 	            connector.releaseClient(endpoint, client);
-	            //homma ohi ja jatketaan parent-luokan koodilla
+                    //we're done with our custom stuff, so let's continue with the original Mule code
 	            
 	            client = connector.createSftpClient(endpoint, notifier);
 	            
@@ -122,10 +121,9 @@ public class CustomSftpMessageDispatcher extends SftpMessageDispatcher {
 	                    transferFilename = sftpUtil.createUniqueSuffix(transferFilename);
 	                }
 	            }
-                //append on siis vasta uudemmissa Mule-versioissa
+                    //comment out the "if" block to use this class with older versions of Mule. SFTP Append mode is a later addition.
 	            // send file over sftp
 	            // choose appropriate writing mode
-	            /**
 	            if (sftpUtil.getDuplicateHandling().equals(SftpConnector.PROPERTY_DUPLICATE_HANDLING_APPEND))
 	            {
 	                client.storeFile(transferFilename, inputStream, SftpClient.WriteMode.APPEND);
@@ -134,8 +132,6 @@ public class CustomSftpMessageDispatcher extends SftpMessageDispatcher {
 	            {
 	                client.storeFile(transferFilename, inputStream);
 	            }
-                */
-	            client.storeFile(transferFilename, inputStream);
 	            if (useTempDir)
 	            {
 	                // Move the file to its final destination
